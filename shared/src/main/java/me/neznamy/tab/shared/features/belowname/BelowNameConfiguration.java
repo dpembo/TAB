@@ -17,11 +17,13 @@ import java.util.Arrays;
 public class BelowNameConfiguration {
 
     @NotNull private final ConfigurationSection section;
+    private final boolean enabled;
     @NotNull private final String value;
     @NotNull private final String title;
     @NotNull private final String fancyValue;
     @NotNull private final String fancyValueDefault;
     @NotNull private final String disableCondition;
+    private final double viewDistance;
 
     /**
      * Returns instance of this class created from given configuration section. If there are
@@ -34,7 +36,8 @@ public class BelowNameConfiguration {
     @NotNull
     public static BelowNameConfiguration fromSection(@NotNull ConfigurationSection section) {
         // Check keys
-        section.checkForUnknownKey(Arrays.asList("enabled", "value", "title", "fancy-value-default", "fancy-value", "disable-condition"));
+        section.checkForUnknownKey(Arrays.asList("enabled", "value", "title", "fancy-value-default",
+                "fancy-value", "disable-condition", "view-distance"));
 
         // Check placeholders in title
         String title = section.getString("title", "Health");
@@ -68,11 +71,13 @@ public class BelowNameConfiguration {
 
         return new BelowNameConfiguration(
                 section,
+                section.getBoolean("enabled", false),
                 value,
                 title,
                 section.getString("fancy-value", "&c" + TabConstants.Placeholder.HEALTH),
                 section.getString("fancy-value-default", "NPC"),
-                section.getString("disable-condition", "%world%=disabledworld")
+                section.getString("disable-condition", "%world%=disabledworld"),
+                section.getNumber("view-distance", 10).doubleValue()
         );
     }
 }
