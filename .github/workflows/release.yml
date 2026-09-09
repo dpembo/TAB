@@ -1,0 +1,168 @@
+name: Release
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch: # Allow manual runs
+
+permissions:
+  contents: write # Needed to create releases and upload assets
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Needed so we can look at previous tags/releases
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Extract version from build.gradle.kts
+        id: version
+        run: |
+          VERSION=$(grep -Po '(?<=version = ")[^"]+' build.gradle.kts)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Detected version from build.gradle.kts: $VERSION"
+
+      - name: Get latest release version
+        id: latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Get the most recent release tag (if any exist)
+          LATEST_TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null || echo "")
+
+          if [ -z "$LATEST_TAG" ] || [ "$LATEST_TAG" = "null" ]; then
+            echo "No previous releases found"
+            echo "latest_version=" >> $GITHUB_OUTPUT
+            echo "is_new_version=true" >> $GITHUB_OUTPUT
+          else
+            # Strip leading 'v' if present
+            LATEST_VERSION=${LATEST_TAG#v}
+            echo "Latest release version: $LATEST_VERSION"
+            echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+
+            CURRENT="${{ steps.version.outputs.version }}"
+            if [ "$CURRENT" = "$LATEST_VERSION" ]; then
+              echo "Version has NOT changed → will create snapshot"
+              echo "is_new_version=false" >> $GITHUB_OUTPUT
+            else
+              echo "Version HAS changed → will create clean release"
+              echo "is_new_version=true" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Determine tag and release name
+        id: naming
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          IS_NEW="${{ steps.latest.outputs.is_new_version }}"
+
+          if [ "$IS_NEW" = "true" ]; then
+            TAG="v${VERSION}"
+            RELEASE_NAME="TAB ${VERSION}"
+            PRERELEASE=false
+
+            if [[ "$VERSION" == *"-pre"* ]] || [[ "$VERSION" == *"SNAPSHOT"* ]] || [[ "$VERSION" == *"RC"* ]]; then
+              PRERELEASE=true
+            fi
+          else
+            TIMESTAMP=$(date -u +%Y%m%d%H%M)
+            TAG="v${VERSION}-snapshot-${TIMESTAMP}"
+            RELEASE_NAME="TAB ${VERSION} Snapshot (${TIMESTAMP})"
+            PRERELEASE=true
+          fi
+
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "release_name=$RELEASE_NAME" >> $GITHUB_OUTPUT
+          echo "prerelease=$PRERELEASE" >> $GITHUB_OUTPUT
+
+          echo "Tag          : $TAG"
+          echo "Release name : $RELEASE_NAME"
+          echo "Prerelease   : $PRERELEASE"
+
+      # This is a large multi-module build (30+ Bukkit NMS modules, plus
+      # BungeeCord/Velocity/Fabric/NeoForge), so expect this step to take
+      # noticeably longer than a single-module plugin build.
+      - name: Build with Gradle
+        run: ./gradlew clean build
+
+      - name: Locate the built jars
+        id: artifact
+        run: |
+          # The jar module produces two jars:
+          #  - "TAB v<version>.jar" for all supported platforms
+          #  - "TAB v<version> - Paper 1.20.5 - 1.21.4.jar", a separate build
+          #    for the Paper versions that break if compiled with Java 24+
+          # Both need to ship — pick the wrong one on those legacy Paper
+          # versions and the plugin won't load.
+          shopt -s nullglob
+          JARS=(jar/build/libs/TAB\ v*.jar)
+
+          if [ ${#JARS[@]} -eq 0 ]; then
+            echo "ERROR: No jars found in jar/build/libs/"
+            ls -la jar/build/libs/
+            exit 1
+          fi
+
+          echo "Found jars:"
+          printf '%s\n' "${JARS[@]}"
+
+          # Pass the list to later steps via a newline-delimited output
+          {
+            echo "jars<<JAREOF"
+            printf '%s\n' "${JARS[@]}"
+            echo "JAREOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release and upload jars
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.naming.outputs.tag }}"
+          NAME="${{ steps.naming.outputs.release_name }}"
+          PRERELEASE="${{ steps.naming.outputs.prerelease }}"
+          VERSION="${{ steps.version.outputs.version }}"
+          SHA="${{ github.sha }}"
+
+          NOTES=$(cat <<EOF
+          Automated build of **TAB** (dpembo fork of NEZNAMY/TAB)
+
+          - **Version:** \`${VERSION}\`
+          - **Commit:** ${SHA}
+          - **Date:** $(date -u +"%Y-%m-%d %H:%M UTC")
+
+          ### Which jar do I need?
+          - \`TAB v${VERSION}.jar\` — use this on every supported platform, **except**:
+          - \`TAB v${VERSION} - Paper 1.20.5 - 1.21.4.jar\` — use this instead if your server is on Paper 1.20.5 through 1.21.4, since those builds break when loaded from a jar compiled with Java 24+.
+          EOF
+          )
+
+          mapfile -t ASSETS <<< "${{ steps.artifact.outputs.jars }}"
+
+          if [ "$PRERELEASE" = "true" ]; then
+            gh release create "$TAG" \
+              --title "$NAME" \
+              --notes "$NOTES" \
+              --prerelease \
+              "${ASSETS[@]}"
+          else
+            gh release create "$TAG" \
+              --title "$NAME" \
+              --notes "$NOTES" \
+              "${ASSETS[@]}"
+          fi
+
+          echo "Release created successfully: $TAG"
