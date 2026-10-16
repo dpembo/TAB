@@ -150,15 +150,11 @@ public class BelowName extends RefreshableFeature implements JoinListener, QuitL
             p.belowNameData.disabled.set(!forced);
             return;
         }
-        if (!configuration.isEnabled()) {
-            p.belowNameData.disabled.set(true);
-            return;
-        }
         updateVisibility(p, disabledNow);
     }
 
     private boolean configuredDisabled(@NotNull TabPlayer p) {
-        return !configuration.isEnabled() || disableChecker.isDisableConditionMet(p);
+        return disableChecker.isDisableConditionMet(p);
     }
 
     private void applyDisabledState(@NotNull TabPlayer p, boolean disabled) {
@@ -294,9 +290,10 @@ public class BelowName extends RefreshableFeature implements JoinListener, QuitL
     }
 
     private void updatePlayer(@NotNull TabPlayer player) {
+        int value = getValue(player);
         for (TabPlayer all : onlinePlayers.getPlayers()) {
-            setScore(player, all, getValue(all), all.belowNameData.fancyValue.getFormat(player));
-            if (all != player) setScore(all, player, getValue(player), player.belowNameData.fancyValue.getFormat(all));
+            if (all != player) setScore(player, all, getValue(all), all.belowNameData.fancyValue.getFormat(player));
+            setScore(all, player, value, player.belowNameData.fancyValue.getFormat(all));
         }
     }
 
@@ -330,8 +327,9 @@ public class BelowName extends RefreshableFeature implements JoinListener, QuitL
     @Override
     public void onVanishStatusChange(@NotNull TabPlayer player) {
         if (player.isVanished()) return;
+        int value = getValue(player);
         for (TabPlayer viewer : onlinePlayers.getPlayers()) {
-            setScore(viewer, player, getValue(player), player.belowNameData.fancyValue.getFormat(viewer));
+            setScore(viewer, player, value, player.belowNameData.fancyValue.getFormat(viewer));
         }
     }
 

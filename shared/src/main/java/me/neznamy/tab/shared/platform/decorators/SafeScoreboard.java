@@ -49,6 +49,9 @@ public abstract class SafeScoreboard<T extends TabPlayer> implements Scoreboard 
     /** Registered teams */
     private final Map<String, Team> teams = new ConcurrentHashMap<>();
 
+    /** Teams indexed by entries */
+    private final Map<String, Team> teamsByEntries = new ConcurrentHashMap<>();
+
     @Override
     public synchronized void registerObjective(@NonNull String objectiveName, @NonNull TabComponent title,
                                         @NonNull HealthDisplay display, @Nullable TabComponent numberFormat) {
@@ -143,6 +146,9 @@ public abstract class SafeScoreboard<T extends TabPlayer> implements Scoreboard 
         }
         Team team = new Team(createTeam(name), name, prefix, suffix, visibility, collision, players, options, color);
         teams.put(name, team);
+        for (String entry : players) {
+            teamsByEntries.put(entry, team);
+        }
         if (frozen) return;
         registerTeam(team);
     }
@@ -153,6 +159,9 @@ public abstract class SafeScoreboard<T extends TabPlayer> implements Scoreboard 
         if (team == null) {
             error("Tried to unregister non-existing team %s for player ", teamName);
             return;
+        }
+        for (String entry : team.getPlayers()) {
+            teamsByEntries.remove(entry, team);
         }
         if (frozen) return;
         unregisterTeam(team);
@@ -324,14 +333,14 @@ public abstract class SafeScoreboard<T extends TabPlayer> implements Scoreboard 
      *          Team name in the packet
      * @param   players
      *          Players in the packet
-     * @return  Modified collection of players
+     * @return  Modified list of players
      */
     @NotNull
-    public Collection<String> onTeamPacket(int action, @NonNull String teamName, @NonNull Collection<String> players) {
-        Collection<String> newList = new ArrayList<>();
+    public List<String> onTeamPacket(int action, @NonNull String teamName, @NonNull Collection<String> players) {
+        List<String> newList = new ArrayList<>();
         if (action == TeamAction.CREATE || action == TeamAction.ADD_PLAYER) {
             for (String entry : players) {
-                Team expectedTeam = getExpectedTeam(entry);
+                Team expectedTeam = teamsByEntries.get(entry);
                 if (expectedTeam == null) {
                     blockedTeamAdds.remove(entry);
                     allowedTeamAdds.put(entry, teamName);
@@ -350,7 +359,7 @@ public abstract class SafeScoreboard<T extends TabPlayer> implements Scoreboard 
         if (action == TeamAction.REMOVE_PLAYER) {
             // TAB does not send remove player, making checks easier
             for (String entry : players) {
-                Team expectedTeam = getExpectedTeam(entry);
+                Team expectedTeam = teamsByEntries.get(entry);
                 if (expectedTeam != null) {
                     allowedTeamAdds.remove(entry);
                     blockedTeamAdds.remove(entry);
@@ -369,14 +378,6 @@ public abstract class SafeScoreboard<T extends TabPlayer> implements Scoreboard 
             blockedTeamAdds.entrySet().removeIf(entry -> entry.getValue().equals(teamName));
         }
         return newList;
-    }
-
-    @Nullable
-    private Team getExpectedTeam(@NotNull String player) {
-        for (Team team : teams.values()) {
-            if (team.getPlayers().contains(player)) return team;
-        }
-        return null;
     }
 
     /**

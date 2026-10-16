@@ -138,15 +138,11 @@ public class YellowNumber extends RefreshableFeature implements JoinListener, Qu
             p.playerlistObjectiveData.disabled.set(!forced);
             return;
         }
-        if (!configuration.isEnabled()) {
-            p.playerlistObjectiveData.disabled.set(true);
-            return;
-        }
         updateVisibility(p, disabledNow);
     }
 
     private boolean configuredDisabled(@NotNull TabPlayer p) {
-        return !configuration.isEnabled() || disableChecker.isDisableConditionMet(p);
+        return disableChecker.isDisableConditionMet(p);
     }
 
     private void applyDisabledState(@NotNull TabPlayer p, boolean disabled) {
@@ -301,8 +297,9 @@ public class YellowNumber extends RefreshableFeature implements JoinListener, Qu
     @Override
     public void onVanishStatusChange(@NotNull TabPlayer player) {
         if (player.isVanished()) return;
+        int value = getValue(player);
         for (TabPlayer viewer : onlinePlayers.getPlayers()) {
-            setScore(viewer, player, getValue(player), player.playerlistObjectiveData.fancyValue.getFormat(viewer));
+            setScore(viewer, player, value, player.playerlistObjectiveData.fancyValue.getFormat(viewer));
         }
     }
 
